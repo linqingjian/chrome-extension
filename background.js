@@ -90,7 +90,7 @@ const CONFLUENCE_BASE_URL = 'https://cf.meitu.com';
 const DEFAULT_WEEKLY_REPORT_ROOT_PAGE_ID = '529775023';
 
 // ==================== 扩展更新相关 ====================
-const FALLBACK_UPDATE_MANIFEST_URL = 'https://lqj2.gitlab.meitu.com/chrome-extension/extension/update_manifest.xml';
+const FALLBACK_UPDATE_MANIFEST_URL = 'https://linqingjian.github.io/chrome-extension/extension/update_manifest.xml';
 const MANIFEST_UPDATE_URL = typeof chrome !== 'undefined' && chrome.runtime?.getManifest
   ? chrome.runtime.getManifest().update_url
   : '';

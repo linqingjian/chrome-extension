@@ -23,7 +23,7 @@ const elements = {
   status: document.getElementById('status'),
 };
 
-const FALLBACK_UPDATE_MANIFEST_URL = 'https://lqj2.gitlab.meitu.com/chrome-extension/extension/update_manifest.xml';
+const FALLBACK_UPDATE_MANIFEST_URL = 'https://linqingjian.github.io/chrome-extension/extension/update_manifest.xml';
 const MANIFEST_UPDATE_URL = typeof chrome !== 'undefined' && chrome.runtime?.getManifest
   ? chrome.runtime.getManifest().update_url
   : '';

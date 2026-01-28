@@ -55,7 +55,7 @@
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "update_url": "https://lqj2.gitlab.meitu.com/chrome-extension/extension/update_manifest.xml",
+  "update_url": "https://linqingjian.github.io/chrome-extension/extension/update_manifest.xml",
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
