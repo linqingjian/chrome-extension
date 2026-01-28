@@ -1803,6 +1803,8 @@ let elements = {};
 
 // ==================== 状态 ====================
 let isTaskRunning = false;
+let taskLogs = [];
+let lastTaskText = '';
 let chatStreamRequestId = null;
 let chatStreamBuffer = '';
 let chatStreamBubbleEl = null;
@@ -1815,6 +1817,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
   await sessionManager.load();
   await skillsManager.load();
+  taskLogs = await loadTaskLogs();
 
   setupEventListeners();
   setupMessageListeners();
@@ -1836,6 +1839,10 @@ function initElements() {
     chatInput: document.getElementById('chatInput'),
     chatSendBtn: document.getElementById('chatSendBtn'),
     chatStatus: document.getElementById('chatStatus'),
+    chatMode: document.getElementById('chatMode'),
+    chatShowPlanToggle: document.getElementById('chatShowPlan'),
+    chatSyncPageButton: document.getElementById('chatSyncPage'),
+    pinBtn: document.getElementById('pinBtn'),
 
     // 控制按钮
     pauseBtn: document.getElementById('pauseBtn'),
@@ -1870,10 +1877,21 @@ function initElements() {
     fileInput: document.getElementById('fileInput'),
     attachmentBar: document.getElementById('attachmentBar'),
 
+    // 任务相关
+    taskInput: document.getElementById('taskInput'),
+    executeBtn: document.getElementById('executeBtn'),
+    sendBtn: document.getElementById('sendBtn'),
+    exportLogsBtn: document.getElementById('exportLogsBtn'),
+    clearLogsBtn: document.getElementById('clearLogsBtn'),
+    outputArea: document.getElementById('outputArea'),
+    resultSection: document.getElementById('resultSection'),
+    resultTitle: document.getElementById('resultTitle'),
+    resultContent: document.getElementById('resultContent'),
+    resultIcon: document.getElementById('resultIcon'),
+
     // 其他
     downloadExtensionBtn: document.getElementById('downloadExtensionBtn'),
-    chatSyncPageButton: document.getElementById('chatSyncPageButton'),
-    chatIncludePageContextToggle: document.getElementById('chatIncludePageContextToggle'),
+    chatIncludePageContextToggle: document.getElementById('chatIncludePageContext'),
   };
 }
 
@@ -1934,6 +1952,8 @@ async function saveConfig() {
  * 设置事件监听器
  */
 function setupEventListeners() {
+  setupTabs();
+
   // 发送消息
   elements.chatSendBtn?.addEventListener('click', handleSendMessage);
   elements.chatInput?.addEventListener('keydown', (e) => {
@@ -1951,6 +1971,7 @@ function setupEventListeners() {
   // 会话管理
   elements.sessionToggle?.addEventListener('click', toggleSidebar);
   elements.newChatBtn?.addEventListener('click', handleNewChat);
+  elements.pinBtn?.addEventListener('click', handleOpenSidePanel);
 
   // 配置变更
   elements.apiUrl?.addEventListener('change', saveConfig);
@@ -1980,6 +2001,12 @@ function setupEventListeners() {
   // Skill 建议
   elements.chatInput?.addEventListener('input', updateSkillSuggest);
   elements.chatInput?.addEventListener('keydown', handleSkillSuggestKeydown);
+
+  // 任务执行
+  elements.executeBtn?.addEventListener('click', handleExecuteTask);
+  elements.sendBtn?.addEventListener('click', handleSendToWechat);
+  elements.exportLogsBtn?.addEventListener('click', handleExportLogs);
+  elements.clearLogsBtn?.addEventListener('click', handleClearTaskLogs);
 
   // 监听会话变更
   sessionManager.addListener(renderSessionUI);
@@ -2053,6 +2080,149 @@ function setupKeepAlive() {
   }
 }
 
+// ==================== Tabs ====================
+
+function setupTabs() {
+  const tabs = document.querySelectorAll('.tab');
+  if (!tabs.length) return;
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.getAttribute('data-tab');
+      if (!target) return;
+
+      tabs.forEach((btn) => btn.classList.remove('active'));
+      tab.classList.add('active');
+
+      document.querySelectorAll('.tab-content').forEach((content) => {
+        const isMatch = content.id === `${target}Tab`;
+        content.classList.toggle('active', isMatch);
+      });
+    });
+  });
+}
+
+function handleOpenSidePanel() {
+  chrome.runtime.sendMessage({ type: UIMessages.OPEN_SIDE_PANEL });
+}
+
+// ==================== 任务执行 ====================
+
+async function startTask(task, preferShenzhou) {
+  if (!task) return;
+
+  isTaskRunning = true;
+  lastTaskText = task;
+  hideResult();
+  updateChatStatus(elements.chatStatus, '执行中...', 'running');
+  setChatControlButtons(
+    { pauseBtn: elements.pauseBtn, resumeBtn: elements.resumeBtn, cancelBtn: elements.cancelBtn },
+    { running: true }
+  );
+
+  chrome.runtime.sendMessage({
+    type: TaskMessages.START_TASK,
+    task,
+    model: elements.model?.value || DEFAULT_MODEL,
+    preferShenzhou,
+    contextText: sessionManager.buildContextText(),
+    skillMentions: extractSkillMentions(task),
+  });
+}
+
+function handleExecuteTask() {
+  const task = elements.taskInput?.value?.trim();
+  if (!task) return;
+
+  elements.taskInput.value = '';
+  startTask(task, true);
+}
+
+async function handleSendToWechat() {
+  const lastResult = await getLastResult();
+  const content = lastResult?.[StorageKeys.LAST_RESULT] || '';
+  if (!content) {
+    updateChatStatus(elements.chatStatus, '无可发送结果', 'error');
+    return;
+  }
+
+  chrome.runtime.sendMessage({
+    type: ExternalMessages.SEND_TO_WECHAT,
+    result: content,
+  }, (response) => {
+    if (response?.success) {
+      updateChatStatus(elements.chatStatus, '已发送到群', 'success');
+    } else {
+      updateChatStatus(elements.chatStatus, response?.error || '发送失败', 'error');
+    }
+  });
+}
+
+function handleExportLogs() {
+  if (!taskLogs.length) {
+    updateChatStatus(elements.chatStatus, '暂无日志可导出', 'error');
+    return;
+  }
+
+  const content = taskLogs.map(formatLogLine).join('\n');
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const filename = `task_logs_${new Date().toISOString().slice(0, 10)}.txt`;
+
+  chrome.downloads.download({ url, filename, saveAs: true }, () => {
+    URL.revokeObjectURL(url);
+  });
+}
+
+async function handleClearTaskLogs() {
+  taskLogs = [];
+  renderTaskLogs();
+  await clearTaskLogs();
+  chrome.runtime.sendMessage({ type: LogMessages.CLEAR_LOGS });
+  hideResult();
+}
+
+function formatLogLine(log) {
+  const time = log?.time || '';
+  const type = log?.type ? log.type.toUpperCase() : 'INFO';
+  const message = log?.message || '';
+  return `[${time}] [${type}] ${message}`;
+}
+
+function appendTaskLog(log) {
+  if (!elements.outputArea || !log) return;
+  const line = document.createElement('div');
+  line.className = `log-line log-${log.type || 'info'}`;
+  line.textContent = formatLogLine(log);
+  elements.outputArea.appendChild(line);
+  elements.outputArea.scrollTop = elements.outputArea.scrollHeight;
+}
+
+function renderTaskLogs() {
+  if (!elements.outputArea) return;
+  elements.outputArea.innerHTML = '';
+
+  if (!taskLogs.length) {
+    elements.outputArea.textContent = '等待执行任务...';
+    return;
+  }
+
+  taskLogs.forEach((log) => appendTaskLog(log));
+}
+
+function showResult(title, content, isError = false) {
+  if (!elements.resultSection) return;
+  elements.resultSection.style.display = 'block';
+  if (elements.resultTitle) elements.resultTitle.textContent = title;
+  if (elements.resultContent) elements.resultContent.textContent = content;
+  if (elements.resultIcon) elements.resultIcon.textContent = isError ? '❌' : '✅';
+}
+
+function hideResult() {
+  if (!elements.resultSection) return;
+  elements.resultSection.style.display = 'none';
+}
+
 // ==================== 消息处理 ====================
 
 /**
@@ -2062,12 +2232,25 @@ async function handleSendMessage() {
   const message = elements.chatInput?.value?.trim();
   if (!message) return;
 
+  const attachments = pendingAttachments.slice();
+  pendingAttachments = [];
+  renderAttachmentBar();
+
   // 清空输入
   elements.chatInput.value = '';
 
   // 添加用户消息
   sessionManager.addMessage('user', message);
   renderChatMessages();
+
+  const mode = elements.chatMode?.value || 'chat';
+  if (mode !== 'chat') {
+    if (attachments.length) {
+      updateChatStatus(elements.chatStatus, '执行模式暂不支持附件，已忽略', 'warn');
+    }
+    startTask(message, mode === 'exec_shenzhou');
+    return;
+  }
 
   // 创建助手消息占位
   chatStreamBuffer = '';
@@ -2094,6 +2277,9 @@ async function handleSendMessage() {
       model: elements.model?.value || DEFAULT_MODEL,
       contextText: sessionManager.buildContextText(),
       skillMentions,
+      attachments,
+      allowImages: attachments.some(item => item.type === 'image'),
+      showPlan: elements.chatShowPlanToggle?.checked !== false,
       includePageContext: elements.chatIncludePageContextToggle?.checked !== false,
     });
   } catch (error) {
@@ -2240,6 +2426,10 @@ function handleTaskComplete(request) {
     { pauseBtn: elements.pauseBtn, resumeBtn: elements.resumeBtn, cancelBtn: elements.cancelBtn },
     { running: false }
   );
+  if (request.result) {
+    showResult('任务完成', request.result, false);
+    saveLastResult(lastTaskText, request.result);
+  }
 }
 
 function handleTaskError(request) {
@@ -2249,6 +2439,9 @@ function handleTaskError(request) {
     { pauseBtn: elements.pauseBtn, resumeBtn: elements.resumeBtn, cancelBtn: elements.cancelBtn },
     { running: false }
   );
+  if (request.error) {
+    showResult('任务失败', request.error, true);
+  }
 }
 
 function handleTaskPaused() {
@@ -2275,8 +2468,12 @@ function handleTaskCanceled() {
 }
 
 function handleLogUpdate(request) {
-  // 可以在这里处理日志更新
-  console.log('日志更新:', request.log);
+  if (!request?.log) return;
+  taskLogs.push(request.log);
+  if (taskLogs.length > MAX_TASK_LOGS) {
+    taskLogs = taskLogs.slice(-MAX_TASK_LOGS);
+  }
+  appendTaskLog(request.log);
 }
 
 // ==================== 会话管理 ====================
@@ -2484,7 +2681,10 @@ async function handleScreenshot() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return;
 
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    if (!dataUrl) {
+      throw new Error('未获取到截图');
+    }
     pendingAttachments.push({
       type: 'image',
       name: '截图',
@@ -2493,6 +2693,7 @@ async function handleScreenshot() {
     renderAttachmentBar();
   } catch (error) {
     console.error('截图失败:', error);
+    updateChatStatus(elements.chatStatus, `截图失败: ${error.message}`, 'error');
   }
 }
 
@@ -2603,6 +2804,7 @@ function renderUI() {
   renderChatMessages();
   renderSessionList();
   renderSkillsList();
+  renderTaskLogs();
 }
 
 function renderChatMessages() {
