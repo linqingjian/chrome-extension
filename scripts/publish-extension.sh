@@ -2,4 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-node "${SCRIPT_DIR}/release.js" "$@"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+OUT_DIR="${ROOT_DIR}/public/extension"
+
+node "${SCRIPT_DIR}/release.js" --out "${OUT_DIR}" --update-manifest "${OUT_DIR}/update_manifest.xml" "$@"
