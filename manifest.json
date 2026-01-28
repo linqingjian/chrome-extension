@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "数仓小助手",
-  "version": "2026.01.28.1",
+  "version": "2026.01.28.2",
   "description": "AI 驱动的数仓助手，自动操作神舟平台",
   "permissions": [
     "activeTab",
