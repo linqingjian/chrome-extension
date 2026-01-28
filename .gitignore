@@ -1,0 +1,6 @@
+.DS_Store
+.stfolder/
+.stignore
+releases/
+.tmp-release/
+node_modules/
